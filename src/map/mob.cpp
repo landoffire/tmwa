@@ -2848,14 +2848,14 @@ int mob_warp(dumb_ptr<mob_data> md, Option<Borrowed<map_local>> m_, int x, int y
  *------------------------------------------
  */
 static
-void mob_countslave_sub(dumb_ptr<block_list> bl, BlockId id, int *c)
+void mob_countslave_sub(dumb_ptr<block_list> bl, BlockId id, int *c, Species slave_type)
 {
     dumb_ptr<mob_data> md;
 
     nullpo_retv(bl);
     md = bl->is_mob();
 
-    if (md->master_id == id)
+    if (md->master_id == id && get_mob_db(slave_type).name == md->name)
         (*c)++;
 }
 
@@ -2864,13 +2864,13 @@ void mob_countslave_sub(dumb_ptr<block_list> bl, BlockId id, int *c)
  *------------------------------------------
  */
 static
-int mob_countslave(dumb_ptr<mob_data> md)
+int mob_countslave(dumb_ptr<mob_data> md, Species slave_type)
 {
     int c = 0;
 
     nullpo_retz(md);
 
-    map_foreachinarea(std::bind(mob_countslave_sub, ph::_1, md->bl_id, &c),
+    map_foreachinarea(std::bind(mob_countslave_sub, ph::_1, md->bl_id, &c, slave_type),
             md->bl_m,
             0, 0,
             md->bl_m->xs - 1, md->bl_m->ys - 1,
@@ -2882,78 +2882,68 @@ int mob_countslave(dumb_ptr<mob_data> md)
  * 手下MOB召喚
  *------------------------------------------
  */
-int mob_summonslave(dumb_ptr<mob_data> md2, int *value_, int amount, int flag)
+int mob_summonslave(dumb_ptr<mob_data> md2, int spawn_type, int amount, int flag)
 {
     dumb_ptr<mob_data> md;
-    int bx, by, count = 0, a = amount;
+    int bx, by;
 
     nullpo_retz(md2);
-    nullpo_retz(value_);
 
     bx = md2->bl_x;
     by = md2->bl_y;
     P<map_local> m = md2->bl_m;
 
-    Species values[5];
-    for (count = 0; count < 5 && value_[count]; ++count)
-        values[count] = wrap<Species>(value_[count]);
-    if (count < 1)
-        return 0;
+    Species mob_class = wrap<Species>(spawn_type);
 
-    for (int k = 0; k < count; k++)
+    if (mobdb_checkid(mob_class) == Species())
     {
-        amount = a;
-        Species mob_class = values[k];
-        if (mobdb_checkid(mob_class) == Species())
+        PRINTF("Warning: bad slave class %u\n"_fmt, mob_class);
+        return 0;
+    }
+    for (; amount > 0; amount--)
+    {
+        int x = 0, y = 0, i = 0;
+        md.new_();
+        if (bool(get_mob_db(mob_class).mode & MobMode::LOOTER))
+            md->lootitemv.clear();
+
+        while ((x <= 0
+                || y <= 0
+                || bool(map_getcell(m, x, y) & MapCell::UNWALKABLE))
+            && (i++) < 100)
         {
-            PRINTF("Warning: bad slave class %u\n"_fmt, mob_class);
-            continue;
+            x = bx + random_::in(-4, 4);
+            y = by + random_::in(-4, 4);
         }
-        for (; amount > 0; amount--)
+        if (i >= 100)
         {
-            int x = 0, y = 0, i = 0;
-            md.new_();
-            if (bool(get_mob_db(mob_class).mode & MobMode::LOOTER))
-                md->lootitemv.clear();
-
-            while ((x <= 0
-                    || y <= 0
-                    || bool(map_getcell(m, x, y) & MapCell::UNWALKABLE))
-                && (i++) < 100)
-            {
-                x = bx + random_::in(-4, 4);
-                y = by + random_::in(-4, 4);
-            }
-            if (i >= 100)
-            {
-                x = bx;
-                y = by;
-            }
-
-            mob_spawn_dataset(md, JAPANESE_NAME, mob_class);
-            md->bl_prev = nullptr;
-            md->bl_next = nullptr;
-            md->bl_m = m;
-            md->bl_x = x;
-            md->bl_y = y;
-
-            md->spawn.m = m;
-            md->spawn.x0 = x;
-            md->spawn.y0 = y;
-            md->spawn.xs = 0;
-            md->spawn.ys = 0;
-            md->stats[mob_stat::SPEED] = md2->stats[mob_stat::SPEED];
-            md->spawn.delay1 = static_cast<interval_t>(-1);   // 一度のみフラグ
-            md->spawn.delay2 = static_cast<interval_t>(-1);   // 一度のみフラグ
-
-            md->npc_event = NpcEvent();
-            md->bl_type = BL::MOB;
-            map_addiddb(md);
-            mob_spawn(md->bl_id);
-
-            if (flag)
-                md->master_id = md2->bl_id;
+            x = bx;
+            y = by;
         }
+
+        mob_spawn_dataset(md, JAPANESE_NAME, mob_class);
+        md->bl_prev = nullptr;
+        md->bl_next = nullptr;
+        md->bl_m = m;
+        md->bl_x = x;
+        md->bl_y = y;
+
+        md->spawn.m = m;
+        md->spawn.x0 = x;
+        md->spawn.y0 = y;
+        md->spawn.xs = 0;
+        md->spawn.ys = 0;
+        md->stats[mob_stat::SPEED] = md2->stats[mob_stat::SPEED];
+        md->spawn.delay1 = static_cast<interval_t>(-1);   // 一度のみフラグ
+        md->spawn.delay2 = static_cast<interval_t>(-1);   // 一度のみフラグ
+
+        md->npc_event = NpcEvent();
+        md->bl_type = BL::MOB;
+        map_addiddb(md);
+        mob_spawn(md->bl_id);
+
+        if (flag)
+            md->master_id = md2->bl_id;
     }
     return 0;
 }
@@ -3299,17 +3289,18 @@ int mobskill_use(dumb_ptr<mob_data> md, tick_t tick,
                 case MobSkillCondition::MSC_ALWAYS:
                     flag = 1;
                     break;
-                case MobSkillCondition::MSC_MYHPLTMAXRATE:    // HP< maxhp%
-                    flag = (md->hp < max_hp * msii.cond2i / 100);
+                case MobSkillCondition::MSC_MYHPLTMAXRATE:      // HP< maxhp%, but can also cap the spawns
+                    flag = ((md->hp < max_hp * msii.cond2i / 100)
+                            && (!msii.val[1] || mob_countslave(md, wrap<Species>(msii.val[0])) < msii.val[1]));
                     break;
                 case MobSkillCondition::MSC_NOTINTOWN:     // Only outside of towns.
                     flag = !md->bl_m->flag.get(MapFlag::TOWN);
                     break;
                 case MobSkillCondition::MSC_SLAVELT:  // slave < num
-                    flag = (mob_countslave(md) < msii.cond2i);
+                    flag = (mob_countslave(md, wrap<Species>(msii.val[0])) < msii.cond2i);
                     break;
                 case MobSkillCondition::MSC_SLAVELE:  // slave <= num
-                    flag = (mob_countslave(md) <= msii.cond2i);
+                    flag = (mob_countslave(md, wrap<Species>(msii.val[0])) <= msii.cond2i);
                     break;
             }
         }

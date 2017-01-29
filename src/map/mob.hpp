@@ -134,7 +134,7 @@ int mobskill_use(dumb_ptr<mob_data> md, tick_t tick, MobSkillCondition event);
 int mobskill_event(dumb_ptr<mob_data> md, BF flag);
 void mobskill_castend_id(TimerData *tid, tick_t tick, BlockId id);
 void mobskill_castend_pos(TimerData *tid, tick_t tick, BlockId id);
-int mob_summonslave(dumb_ptr<mob_data> md2, int *value, int amount, int flag);
+int mob_summonslave(dumb_ptr<mob_data> md2, int spawn_type, int amount, int flag);
 
 void mob_reload(void);
 } // namespace map

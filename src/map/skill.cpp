@@ -536,7 +536,7 @@ int skill_castend_nodamage_id(dumb_ptr<block_list> src, dumb_ptr<block_list> bl,
             if (md && !md->master_id)
             {
                 mob_summonslave(md,
-                        md->skillidx->val,
+                        md->skillidx->val[0],
                         skilllv,
                         1);
             }
